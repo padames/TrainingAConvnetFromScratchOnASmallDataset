@@ -1,0 +1,84 @@
+---
+title: "NMIST prediction with convolutional networks"
+output: html_notebook
+---
+
+This notebook takes the explanation and documents, runs the code from the book [Deep learning with R](https://learning.oreilly.com/library/view/deep-learning-with/9781617295546/). 
+
+We’re about to dive into the theory of what convnets are and why they have been so successful at computer vision tasks. But first, let’s take a practical look at a simple convnet example. It uses a convnet to classify MNIST digits, a task we performed in chapter 2 using a densely connected network (our test accuracy then was 97.8%). Even though the convnet will be basic, its accuracy will blow out of the water that of the densely connected model from chapter 2. 
+
+
+```{r "loading the keras library and requirements"}
+list.of.packages <- c("keras")
+# installed.packages() returns a matrix of characters
+new.packages <- list.of.packages[!(list.of.packages %in% 
+                                     installed.packages()[,"Package"])]
+if(length(new.packages)) 
+  install.packages(new.packages)
+# clean up environment
+rm(list.of.packages, new.packages)
+```
+
+
+The following lines of code show you what a basic convnet looks like. It’s a stack of Conv2D and MaxPooling2D layers. You’ll see in a minute exactly what they do.
+
+```{r "creating a convnet for the nmist sample data"}
+library(keras)
+model <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 32, kernel_size = c(3, 3), activation = "relu", input_shape = c(28, 28, 1)) %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3, 3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3, 3), activation = "relu")
+```
+
+```{r "Seeing the densely connected model"}
+model
+```
+With 55,744 trainable parameters this is quite a computationally heavy model.
+
+You can see that the output of every layer_conv_2d and layer_max_pooling_2d is a 3D tensor of shape (height, width, channels). The width and height dimensions tend to shrink as you go deeper in the network. The number of channels is controlled by the first argument passed to layer_conv_2d (32 or 64).
+
+The next step is to feed the last output tensor (of shape (3, 3, 64)) into a densely connected classifier network like those you’re already familiar with: a stack of dense layers. These classifiers process vectors, which are 1D, whereas the current output is a 3D tensor. First we have to flatten the 3D outputs to 1D, and then add a few dense layers on top.      
+
+```{r "add a regular multi-layer perceptron at the end"}
+model <- model %>%  layer_flatten() %>%
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 10, activation = "softmax")
+```
+
+That's now 99,322 trainable parameters.
+
+As you can see, the (3, 3, 64) outputs are flattened into vectors of shape (576) before going through two dense layers.                  
+
+Now, let’s train the convnet on the MNIST digits. We’ll reuse a lot of the code from the MNIST example in chapter 2.
+
+```{r}
+mnist <- dataset_mnist()
+c(c(train_images, train_labels), c(test_images, test_labels)) %<-% mnist
+train_images <- array_reshape(train_images, c(60000, 28, 28, 1))
+train_images <- train_images / 255
+test_images <- array_reshape(test_images, c(10000, 28, 28, 1))
+test_images <- test_images / 255
+train_labels <- to_categorical(train_labels)
+test_labels <- to_categorical(test_labels)
+model %>% compile(  optimizer = "rmsprop",  loss = "categorical_crossentropy",  metrics = c("accuracy"))
+model %>% fit(  train_images, train_labels,  epochs = 5, batch_size=64)
+
+```
+```{r "evaluate model on test data"}
+results <- model %>% evaluate(test_images, test_labels)
+results
+```
+
+Wow, 0.9921 on the test set and 0.9942 on the training set.
+
+From the explanation in Section 5.1.1 the argument `output_depth` to the object `layer_convnet_2d` is given by the number fo filters to be applied to the input tensor. The size of the filters is passed as the next parameter `window_size`, as `c(window_height, window_width)`.
+
+The most important concept in convolutional netwarks is that each filter creates a feauture map of the input. These features have two characteristics: translational invariant and they learn spatial hierarchies of patterns.
+
+What we call convolution un deep learning is really a cross-correlation operation because mathematical convolution involves flipping the filter values before mutiplying by the inputs and adding all terms.
+
+The pooling explanation is particularly useful because without any sort of pooling the dimensions of the resulting layers would be too large to process in the densely connected neural network downstream and the ability to capture average presence of features that aggregate and bubble up into higher level structures representing hierarchies that generalize well by looking at bigger picture features based upon averaging the features of smaller tiles.
+
+
